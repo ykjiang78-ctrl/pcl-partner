@@ -13,7 +13,7 @@ export default async function PostDetailPage({
   // 获取帖子
   const { data: post } = await supabase
     .from("posts")
-    .select("*, profiles!posts_user_id_fkey(nickname, avatar_url)")
+    .select("*, profiles!posts_user_id_fkey(nickname, avatar_url, is_vip, vip_expires_at)")
     .eq("id", id)
     .single();
 
@@ -29,10 +29,29 @@ export default async function PostDetailPage({
     );
   }
 
+  // 获取点赞数
+  const { count: likeCount } = await supabase
+    .from("post_likes")
+    .select("*", { count: "exact", head: true })
+    .eq("post_id", id);
+  post.post_likes_count = likeCount || 0;
+
+  // 获取活跃置顶信息
+  const { data: activeBoost } = await supabase
+    .from("post_boosts")
+    .select("expires_at")
+    .eq("post_id", id)
+    .gt("expires_at", new Date().toISOString())
+    .order("expires_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  post.active_boost = activeBoost || null;
+
   // 获取留言
   const { data: replies } = await supabase
     .from("replies")
-    .select("*, profiles!replies_user_id_fkey(nickname, avatar_url)")
+    .select("*, profiles!replies_user_id_fkey(nickname, avatar_url, is_vip, vip_expires_at)")
     .eq("post_id", id)
     .order("created_at", { ascending: true });
 

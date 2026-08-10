@@ -31,7 +31,7 @@ export default function NewPostPage() {
   return (
     <div className="max-w-xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">📝 发布找搭子</h1>
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <div className="card card-hover p-6">
         <PostForm />
       </div>
     </div>

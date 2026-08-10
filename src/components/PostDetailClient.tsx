@@ -3,6 +3,19 @@
 import { createClient } from "@/lib/supabase-client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import FavoriteButton from "./FavoriteButton";
+import ReportButton from "./ReportButton";
+import BoostButton from "./BoostButton";
+import VipBadge from "./VipBadge";
+import LikeButton from "./LikeButton";
+
+const PLATFORM_LABELS: Record<string, string> = {
+  java: "Java版",
+  bedrock: "基岩版",
+  steam: "Steam",
+  epic: "Epic",
+  other: "其他",
+};
 
 export default function PostDetailClient({
   post,
@@ -18,9 +31,13 @@ export default function PostDetailClient({
   const [replies, setReplies] = useState(initialReplies);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const timeAgo = getTimeAgo(post.created_at);
   const author = post.profiles;
+  const isExpired = post.expires_at && new Date(post.expires_at) < new Date();
 
   const handleReply = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,10 +62,34 @@ export default function PostDetailClient({
   };
 
   const handleDeletePost = async () => {
-    if (!confirm("确定删除这条帖子吗？")) return;
+    setDeleting(true);
     await supabase.from("posts").delete().eq("id", post.id);
     router.push("/");
     router.refresh();
+  };
+
+  const handleDeleteReply = async (replyId: string) => {
+    await supabase.from("replies").delete().eq("id", replyId);
+    setReplies(replies.filter((r: any) => r.id !== replyId));
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/posts/${post.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
@@ -57,10 +98,28 @@ export default function PostDetailClient({
         ← 返回列表
       </a>
 
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-        <span className="inline-block bg-indigo-50 text-indigo-600 text-xs px-3 py-1 rounded-full mb-3 font-medium">
-          🎮 {post.game}
-        </span>
+      <div className={`card card-hover p-6 ${isExpired ? "opacity-70" : ""}`}>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="inline-block bg-indigo-50 text-indigo-600 text-xs px-3 py-1 rounded-full font-medium">
+            🎮 {post.game}
+          </span>
+          {post.platform && (
+            <span className="inline-block bg-purple-50 text-purple-600 text-xs px-2 py-0.5 rounded-full">
+              {PLATFORM_LABELS[post.platform] || post.platform}
+            </span>
+          )}
+          {post.game_version && (
+            <span className="inline-block bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full">
+              v{post.game_version}
+            </span>
+          )}
+          {isExpired && (
+            <span className="inline-block bg-gray-200 text-gray-400 text-xs px-2 py-0.5 rounded-full">
+              ⏰ 已过期
+            </span>
+          )}
+        </div>
+
         <h1 className="text-2xl font-bold mb-2">{post.title}</h1>
         <p className="text-xs text-gray-400 mb-4">🕐 {timeAgo} 发布</p>
 
@@ -70,27 +129,123 @@ export default function PostDetailClient({
           )}
           <span className="text-sm text-gray-600">
             <span className="text-gray-400">发布者：</span>
-            <strong>{author?.nickname || "匿名玩家"}</strong>
+            <a href={`/profile/${post.user_id}`} className="hover:text-indigo-600 transition">
+              <strong>{author?.nickname || "匿名玩家"}</strong>
+            </a>
           </span>
+          <VipBadge expiresAt={author?.vip_expires_at} showText />
         </div>
+
+        {/* 队伍信息 */}
+        {post.max_players && (
+          <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-3 mb-4 flex items-center gap-3">
+            <span className="text-sm text-gray-500">👥 队伍</span>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-indigo-500 rounded-full h-2 transition-all"
+                    style={{ width: `${Math.min(100, ((post.current_players || 0) / post.max_players) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-sm font-medium text-indigo-600">
+                  {post.current_players || 0}/{post.max_players}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap mb-5">
           {post.description}
         </p>
 
-        <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-4 mb-6 flex justify-between items-center">
+        <div className="bg-indigo-50/50 border border-indigo-100 rounded-lg p-4 mb-4 flex justify-between items-center">
           <span className="text-sm text-gray-500">📞 联系方式</span>
-          <span className="text-indigo-600 font-semibold">{post.contact}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-indigo-600 font-semibold">{post.contact}</span>
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(post.contact);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch {}
+              }}
+              className="text-xs text-gray-400 hover:text-indigo-500 transition"
+            >
+              {copied ? "✅" : "📋"}
+            </button>
+          </div>
         </div>
 
-        {userId === post.user_id && (
-          <div className="mb-4">
+        {/* 操作按钮 */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap gap-3">
+            <LikeButton
+              postId={post.id}
+              userId={userId}
+              initialCount={post.post_likes_count || 0}
+            />
+            <FavoriteButton postId={post.id} userId={userId} />
+            {userId !== post.user_id && (
+              <ReportButton postId={post.id} userId={userId} />
+            )}
+          </div>
+          <div className="flex items-center gap-3">
             <button
-              onClick={handleDeletePost}
-              className="text-xs text-red-400 hover:text-red-600"
+              onClick={handleShare}
+              className="text-xs text-gray-400 hover:text-indigo-500 transition"
             >
-              删除帖子
+              {copied ? "✅ 已复制" : "🔗 分享"}
             </button>
+            {userId === post.user_id && (
+              <>
+                <BoostButton
+                  postId={post.id}
+                  userId={userId!}
+                  isBoosted={!!post.active_boost}
+                  boostExpiresAt={post.active_boost?.expires_at}
+                />
+                <a
+                  href={`/posts/${post.id}/edit`}
+                  className="text-xs text-indigo-500 hover:text-indigo-600"
+                >
+                  ✏️ 编辑
+                </a>
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="text-xs text-red-400 hover:text-red-600"
+                >
+                  🗑️ 删除
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 删除确认弹窗 */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-sm mx-4 shadow-xl">
+              <h3 className="text-lg font-semibold mb-2">确认删除</h3>
+              <p className="text-sm text-gray-500 mb-5">删除后无法恢复，确定要删除这条帖子吗？</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleDeletePost}
+                  disabled={deleting}
+                  className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition disabled:opacity-50"
+                >
+                  {deleting ? "删除中..." : "确认删除"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -105,17 +260,27 @@ export default function PostDetailClient({
               <p className="text-sm text-gray-300 py-3">还没有留言，来抢沙发吧 🛋️</p>
             ) : (
               replies.map((reply: any) => (
-                <div key={reply.id} className="flex items-start gap-2 py-2 border-b border-gray-50 last:border-0">
+                <div key={reply.id} className="flex items-start gap-2 py-2 border-b border-gray-50 last:border-0 group">
                   {reply.profiles?.avatar_url && (
                     <img src={reply.profiles.avatar_url} alt="" className="w-5 h-5 rounded-full mt-0.5" />
                   )}
-                  <div>
-                    <span className="text-xs font-semibold text-indigo-600">
-                      {reply.profiles?.nickname || "匿名"}
-                    </span>
-                    <span className="text-xs text-gray-300 ml-2">{getTimeAgo(reply.created_at)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <a href={`/profile/${reply.user_id}`} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+                        {reply.profiles?.nickname || "匿名"}
+                      </a>
+                      <span className="text-xs text-gray-300">{getTimeAgo(reply.created_at)}</span>
+                    </div>
                     <p className="text-sm text-gray-700 mt-0.5">{reply.text}</p>
                   </div>
+                  {userId === reply.user_id && (
+                    <button
+                      onClick={() => handleDeleteReply(reply.id)}
+                      className="text-xs text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0"
+                    >
+                      删除
+                    </button>
+                  )}
                 </div>
               ))
             )}
